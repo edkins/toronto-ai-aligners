@@ -149,6 +149,7 @@ def main():
         total += np.product(p.shape)
     print(f'{total} parameters')
 
+    chattiness = 200
     avg = torch.tensor(0.0).to(device)
     try:
         for i in range(1000000):
@@ -194,7 +195,7 @@ def main():
             loss.backward()
             optimizer.step()
             avg += loss.detach()
-            if i > 0 and i % 200 == 0:
+            if i > 0 and i % chattiness == 0:
                 output = bytearray()
                 for p in X.to('cpu').numpy()[0]:
                     output += vocab[p]
@@ -213,8 +214,8 @@ def main():
                 #print(bytes(output2), pred[0][window_size-1].max().item())
                 #print(pred[0,32].item())
                 #print(pred[0,0].item())
-            if i > 0 and i % 200 == 0:
-                print(i, avg.item())
+            if i > 0 and i % chattiness == 0:
+                print(i, avg.item() / chattiness)
                 avg *= 0
     finally:
         torch.save(model.state_dict(), 'data/model.pth')

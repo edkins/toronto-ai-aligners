@@ -6,6 +6,7 @@ import random
 import math
 import itertools
 import sys
+from collections import defaultdict
 
 window_size = 32
 embedding_size = 120
@@ -14,10 +15,10 @@ output_embedding_size = embedding_size
 mlp_hidden_size = 128
 mlp_layers = 4
 vocab_size = 16384
-n_heads = 1
-n_layers = 1
-t_key_size = 64
-t_value_size = 64
+n_heads = 4
+n_layers = 2
+t_key_size = 32
+t_value_size = 32
 
 class AttentionHead(Module):
     def __init__(self, in_size, value_size, key_size):
@@ -27,12 +28,16 @@ class AttentionHead(Module):
         self.wq = Parameter(torch.rand((in_size, key_size)))
         tri = (np.tril(np.full((window_size, window_size),2.0, dtype='float32')) - 1) * 100000.0
         self.tri = Parameter(torch.tensor(tri), requires_grad=False)
+        self.scale = 1 / 256
 
     def forward(self, x):
+        #x = torch.nn.functional.normalize(x)
         k = x.matmul(self.wk)
         q = x.matmul(self.wq)
         v = x.matmul(self.wv)
-        a = q.matmul(k.T).minimum(self.tri).softmax(dim=1)
+        a = (q.matmul(k.T) * self.scale).minimum(self.tri).softmax(dim=1)
+        #if random.random() < 0.001:
+        #    print(a)
         result = a.matmul(v)
         return result
 
@@ -43,18 +48,21 @@ class TransformerLayer(Module):
         self.heads = ModuleList([AttentionHead(in_out_size, t_value_size, t_key_size) for _ in range(n_heads)])
         self.dropout = Dropout(p=0.1)
         self.linear = Linear(t_value_size * n_heads, in_out_size)
-        self.linear2 = Linear(in_out_size, in_out_size)
+        self.linear2 = Linear(in_out_size, 512)
         self.relu = ReLU()
-        self.linear3 = Linear(in_out_size, in_out_size)
+        self.linear3 = Linear(512, in_out_size)
         self.dropout2 = Dropout(p=0.1)
+        self.bypass = False
 
     def forward(self, x):
-        y = torch.cat([self.heads[i](x) for i in range(n_heads)], dim=1)
-        y = self.linear(y)
-        y = self.dropout(y)
-        #y = torch.nn.functional.normalize(x + y, dim=1)
-        y = torch.nn.functional.layer_norm(x + y, (self.in_out_size,))
-        #y = (x + y)
+        if self.bypass:
+            y = x
+        else:
+            y = torch.cat([self.heads[i](x) for i in range(n_heads)], dim=1)
+            y = self.linear(y)
+            y = self.dropout(y)
+            #y = torch.nn.functional.layer_norm(x + y, (self.in_out_size,))
+            y = torch.nn.functional.layer_norm(x + y, (self.in_out_size,))
         z = self.linear2(y)
         z = self.relu(z)
         z = self.linear3(z)
@@ -64,28 +72,37 @@ class TransformerLayer(Module):
         #return y + z
 
 class MyTransformer(Module):
-    def __init__(self):
+    def __init__(self, embedding=None):
         super().__init__()
-        self.embed = Embedding(num_embeddings=vocab_size, embedding_dim=embedding_size)
+        if embedding is None:
+            e = None
+        else:
+            e = torch.tensor(embedding.astype('float32'))
+        self.embed = Embedding(num_embeddings=vocab_size, embedding_dim=embedding_size, _weight=e)
         self.index = Parameter(torch.rand((window_size, index_size)))
         self.dropout = Dropout(p=0.1)
         layers = []
         in_size = embedding_size + index_size
+        self.bypass = False
+        self.bypass_layer = Linear(in_size, in_size)
         for i in range(n_layers):
             layers.append(TransformerLayer(in_size))
             #layers.append(AttentionHead(in_size, in_size, t_key_size))
         self.layers = Sequential(*layers)
-        #self.deembed = Linear(in_size, vocab_size)
+        self.deembed = Linear(in_size, vocab_size)
         self.softmax = LogSoftmax(dim=1)
 
     def forward(self, x):
         #index = torch.eye(window_size).to('cuda')
         x = torch.cat([self.embed(x), self.index], dim=1)
         x = self.dropout(x)
-        x = self.layers(x)
-        #x = self.deembed(x)
-        x = x[:,:embedding_size]
-        x = x.matmul(self.embed.weight.T)
+        if self.bypass:
+            x = self.bypass_layer(x)
+        else:
+            x = self.layers(x)
+        x = self.deembed(x)
+        #x = x[:,:embedding_size]
+        #x = x.matmul(self.embed.weight.T)
         x = self.softmax(x)
         return x
 
@@ -115,6 +132,38 @@ class MyMLP(Module):
         x = self.softmax(x)
         return x
 
+def show_histogram(vocab,h):
+    buckets = defaultdict(list)
+    for i,count in enumerate(h):
+        word = vocab[i]
+        if count > 0:
+            bucket = math.floor(math.log10(count))
+            buckets[bucket].append(word)
+    for i,words in sorted(buckets.items()):
+        print(f'10^{i}: ({len(words)}) {words[:100]}')
+
+def guess_embedding(tokens):
+    from sklearn.decomposition import TruncatedSVD
+    from scipy.sparse import coo_array
+
+    print('Calculating sparse matrix')
+    values = np.ones((len(tokens)-1))
+    #histogram = np.histogram(tokens, bins=vocab_size, range=(0, vocab_size-1))[0].astype('float32') ** -0.5
+    #tfreqs = histogram[tokens]
+    #values = tfreqs[:-1] * tfreqs[1:]
+    coo = coo_array((values, (tokens[:-1], tokens[1:])), shape=(vocab_size,vocab_size))
+    print('Calculating csr')
+    csr = coo.tocsr()
+    print('Calculating embedding')
+    embedding = TruncatedSVD(embedding_size).fit_transform(csr)
+    print('Done embedding')
+    #mean = np.mean(embedding, axis=0).reshape(1, embedding_size)
+    var = np.var(embedding)
+    result = embedding / np.sqrt(var)
+    print(var)
+    return result
+
+
 def main():
     tokens = np.fromfile('data/tokens_enwik9', dtype='uint16')
     #tokens = np.fromfile('data/stripped_enwik9.txt', dtype='uint8')
@@ -134,17 +183,21 @@ def main():
     while len(vocab) < vocab_size:
         vocab.append(b"[INVALID]")
 
-    #weights = 1 + np.histogram(tokens, bins=vocab_size, range=(0, vocab_size-1))[0].astype('float32')
-    #weights[0] += 30000000    # training process introduces zeros
+    histogram = np.histogram(tokens, bins=vocab_size, range=(0, vocab_size-1))[0]
+    #show_histogram(vocab,histogram)
+    weights = (1 + histogram.astype('float32')) ** -0.5
+    weights[0] /= 1000000     # training process introduces zeros
+    #weights[0] += 3000000    # training process introduces zeros
     #weights = weights.sum() / weights
-    #print('Calculated weights')
+    print('Calculated weights')
 
     device = torch.device('cuda')
     mlp = False
     if mlp:
         model = MyMLP().to(device)
     else:
-        model = MyTransformer().to(device)
+        #model = MyTransformer(embedding=guess_embedding(tokens)).to(device)
+        model = MyTransformer(embedding=None).to(device)
     #loss_fn = CrossEntropyLoss(weight=torch.tensor(weights.astype('float32')).to(device))
     #loss_fn = CrossEntropyLoss(weight=None, label_smoothing=0.1)
     #loss_fn = NLLLoss(weight=torch.tensor(weights.astype('float32')).to(device))
@@ -258,10 +311,7 @@ def main():
                     
         print(output)
 
-def predict():
-    model = MyTransformer()
-    model.load_state_dict(torch.load('data/model.pth'))
-    prompt = input("Enter prompt: ")
+def load_vocab():
     vocab = []
     for i in range(256):
         vocab.append(i.to_bytes(1, byteorder='little'))
@@ -273,6 +323,13 @@ def predict():
                 break
     while len(vocab) < vocab_size:
         vocab.append(b"[INVALID]")
+    return vocab
+
+def predict():
+    model = MyTransformer()
+    model.load_state_dict(torch.load('data/model.pth'))
+    prompt = input("Enter prompt: ")
+    vocab = load_vocab()
 
     remainder = prompt.encode('utf-8')
     tokens = []
@@ -301,8 +358,47 @@ def predict():
         output += vocab[next_token]
     print(bytes(output))
 
+def analyze():
+    model = MyTransformer()
+    model.load_state_dict(torch.load('data/model.pth'))
+    X = model.embed.weight.detach().numpy()
+    show_embed(X, 5)
+
+def analyze1():
+    model = MyTransformer()
+    model.load_state_dict(torch.load('data/model.pth'))
+    X = model.deembed.weight.detach().numpy()
+    show_embed(X, 5)
+
+def analyze2():
+    tokens = np.fromfile('data/tokens_enwik9', dtype='uint16')
+    embedding = guess_embedding(tokens)
+    show_embed(embedding, 30)
+
+def show_embed(X, perplexity):
+    from sklearn.manifold import TSNE
+    vocab = load_vocab();
+    tsne = TSNE(verbose=2, perplexity=perplexity)
+    points = tsne.fit_transform(X)
+    doc = ['<?xml version="1.0"?>\n','<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000">\n']
+    size = max(points[:,0].max(), points[:,1].max(), -points[:,0].min(), -points[:,1].min())
+    for i,(x,y) in enumerate(points):
+        px = 500 + 500 * x / size
+        py = 500 + 500 * y / size
+        if len(vocab[i]) > 1 or (32 <= vocab[i][0] <= 126 and vocab[i] not in [b'"', b'&', b'<', b'>']):
+            doc.append(f'<text font-size="2px" x="{px}" y="{py}">{vocab[i].decode("utf-8")}</text>\n')
+    doc.append('</svg>')
+    with open('data/graph.svg','w') as f:
+        f.write(''.join(doc))
+
 if __name__ == '__main__':
     if sys.argv[1] == 'train':
         main()
     elif sys.argv[1] == 'eval':
         predict()
+    elif sys.argv[1] == 'analyze':
+        analyze()
+    elif sys.argv[1] == 'analyze1':
+        analyze1()
+    elif sys.argv[1] == 'analyze_guess':
+        analyze2()
