@@ -1,77 +1,18 @@
 import numpy as np
-from torch.nn import Module, Embedding, Sequential, Linear, Flatten, Conv1d, ReLU, Unflatten, Softmax, CrossEntropyLoss, ModuleList, NLLLoss, Dropout, LogSoftmax
+from torch.nn import Module, Embedding, Sequential, Linear, Flatten, Conv1d, ReLU, GELU, Unflatten, Softmax, CrossEntropyLoss, ModuleList, NLLLoss, Dropout, LogSoftmax
 from torch.nn.parameter import Parameter
 import torch
 import random
 import math
 import itertools
 import sys
-from collections import defaultdict
 import time
+from collections import defaultdict
 
-window_size = 32
-embedding_size = 28
-index_size = 4
-output_embedding_size = embedding_size
-mlp_hidden_size = 128
-mlp_layers = 4
 vocab_size = 16384
-n_heads = 1
-n_layers = 1
-t_key_size = 8
-t_value_size = 8
-
-class AttentionHead(Module):
-    def __init__(self, in_size, value_size, key_size):
-        super().__init__()
-        self.wk = Linear(in_size, key_size)
-        self.wv = Linear(in_size, value_size)
-        self.wq = Linear(in_size, key_size)
-        tri = (np.tril(np.full((window_size, window_size),2.0, dtype='float32')) - 1) * 100000.0
-        self.tri = Parameter(torch.tensor(tri), requires_grad=False)
-        self.scale = 1 / 256
-
-    def forward(self, x):
-        #k = torch.nn.functional.normalize(x.matmul(self.wk))
-        #q = torch.nn.functional.normalize(x.matmul(self.wq))
-        k = self.wk(x)
-        q = self.wq(x)
-        v = self.wv(x)
-        a = (q.matmul(k.T) * self.scale).minimum(self.tri).softmax(dim=1)
-        #if random.random() < 0.001:
-        #    print(a)
-        result = a.matmul(v)
-        return result
-
-class TransformerLayer(Module):
-    def __init__(self, in_out_size):
-        super().__init__()
-        self.in_out_size = in_out_size
-        self.heads = ModuleList([AttentionHead(in_out_size, t_value_size, t_key_size) for _ in range(n_heads)])
-        self.dropout = Dropout(p=0.1)
-        self.linear = Linear(t_value_size * n_heads, in_out_size)
-        self.linear2 = Linear(in_out_size, in_out_size)
-        self.relu = ReLU()
-        self.linear3 = Linear(in_out_size, in_out_size)
-        self.dropout2 = Dropout(p=0.1)
-        self.bypass = False
-
-    def forward(self, x):
-        if self.bypass:
-            y = x
-        else:
-            y = torch.cat([self.heads[i](x) for i in range(n_heads)], dim=1)
-            y = self.linear(y)
-            y = self.dropout(y)
-            #y = torch.nn.functional.layer_norm(x + y, (self.in_out_size,))
-            y = torch.nn.functional.layer_norm(x + y, (self.in_out_size,))
-        z = self.linear2(y)
-        z = self.relu(z)
-        z = self.linear3(z)
-        z = self.dropout2(z)
-        #return torch.nn.functional.normalize(y + z, dim=1)
-        return torch.nn.functional.layer_norm(y + z, (self.in_out_size,))
-        #return y + z
+window_size = 32
+embedding_size = 32
+output_embedding_size = 32
 
 class MyTransformer(Module):
     def __init__(self, embedding=None, deembedding=None):
@@ -85,77 +26,21 @@ class MyTransformer(Module):
             d = None
         else:
             d = torch.tensor(deembedding.astype('float32'))
+
         self.embed = Embedding(num_embeddings=vocab_size, embedding_dim=embedding_size, _weight=e)
-        if embedding is not None:
-            self.embed.weight.requires_grad = False
-        self.index = Parameter(torch.rand((window_size, index_size)))
-        self.dropout = Dropout(p=0.1)
-        layers = []
-        in_size = embedding_size + index_size
-        self.bypass = False
-        self.bypass_layer = Linear(in_size, in_size)
-        self.bypass_layer.weight.data[:] = torch.eye(in_size)
-        for i in range(n_layers):
-            layers.append(TransformerLayer(in_size))
-            #layers.append(AttentionHead(in_size, in_size, t_key_size))
-        self.layers = Sequential(*layers)
-        self.deembed = Linear(embedding_size, vocab_size)
+        self.stack = Sequential(GELU(), Linear(2 * embedding_size, output_embedding_size), GELU())
+        self.deembed = Linear(output_embedding_size, vocab_size)
         if d is not None:
             self.deembed.weight.data[:] = d.T
-            self.deembed.weight.requires_grad = False
             self.deembed.bias.data[:] = 0
-            self.deembed.bias.requires_grad = False
-        self.softmax = LogSoftmax(dim=1)
-
-    def forward(self, x):
-        #index = torch.eye(window_size).to('cuda')
-        x = torch.cat([self.embed(x), self.index], dim=1)
-        x = self.dropout(x)
-        if self.bypass:
-            x = self.bypass_layer(x)
-        else:
-            x = self.layers(x)
-        x = x[:,:embedding_size]
-        x = self.deembed(x)
-        #x = x.matmul(self.embed.weight.T)
-        #x = self.softmax(x)
-        return x
-
-
-class MyMLP(Module):
-    def __init__(self):
-        super().__init__()
-        self.embed = Embedding(num_embeddings=vocab_size, embedding_dim=embedding_size)
-        mlp = [Flatten(start_dim=0)]
-        in_size = embedding_size * window_size
-        for i in range(mlp_layers):
-            out_size = (output_embedding_size * window_size) if i==mlp_layers-1 else mlp_hidden_size
-            mlp.append(Linear(in_size, out_size))
-            mlp.append(ReLU())
-            in_size = out_size
-        #mlp.append(Unflatten(0, (window_size, output_embedding_size)))
-        self.mlp = Sequential(*mlp)
-        #self.deembed = Conv1D(in_channels=output_embedding_size, out_channels=vocab_size, kernel_size=1)
-        #self.softmax = SoftMax(dim=1)
-        self.deembed = Linear(window_size * output_embedding_size, vocab_size)
-        self.softmax = Softmax(dim=0)
 
     def forward(self, x):
         x = self.embed(x)
-        x = self.mlp(x)
-        x = self.deembed(x)
-        x = self.softmax(x)
+        x = self.stack(x)
+        #x = self.deembed(x)
+        x = x.matmul(self.embed.weight.T)
         return x
 
-def show_histogram(vocab,h):
-    buckets = defaultdict(list)
-    for i,count in enumerate(h):
-        word = vocab[i]
-        if count > 0:
-            bucket = math.floor(math.log10(count))
-            buckets[bucket].append(word)
-    for i,words in sorted(buckets.items()):
-        print(f'10^{i}: ({len(words)}) {words[:100]}')
 
 def guess_embedding(tokens):
     from sklearn.decomposition import TruncatedSVD
@@ -235,18 +120,11 @@ def main():
     if mlp:
         model = MyMLP().to(device)
     else:
-        #model = MyTransformer(embedding=guess_embedding(tokens)).to(device)
         #e, d = guess_embeddings_nmf(tokens)
         #model = MyTransformer(embedding=e, deembedding=d).to(device)
-        model = MyTransformer(embedding=None).to(device)
-    #loss_fn = CrossEntropyLoss(weight=torch.tensor(weights.astype('float32')).to(device))
-    #loss_fn = CrossEntropyLoss(weight=None, label_smoothing=0.1)
-    loss_fn = CrossEntropyLoss(weight=None)
-    #loss_fn = NLLLoss(weight=torch.tensor(weights.astype('float32')).to(device))
-    #loss_fn = NLLLoss()
-    #optimizer = torch.optim.SGD(model.parameters(), lr=10, weight_decay=1e-5)
-    #optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, weight_decay=1e-5, betas=(0.9, 0.98))
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, weight_decay=0, betas=(0.9, 0.98))
+        model = MyTransformer().to(device)
+    loss_fn = CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     total = 0
     for p in model.parameters():
         total += np.product(p.shape)
@@ -255,7 +133,6 @@ def main():
     chattiness = 1000
     avg = torch.tensor(0.0).to(device)
     switched = False
-    tokens_seen = 0
     start_time = time.monotonic()
     try:
         for i in range(1000000):
@@ -282,7 +159,6 @@ def main():
                     length = min(len(snippet)-1,window_size)
                     X[:length] = snippet[:length]
                     y[:length] = snippet[1:length+1]
-                    tokens_seen += length
                     X = torch.tensor(X).to(device)
                     y = torch.tensor(y).to(device)
                     pred = model(X)
@@ -318,7 +194,7 @@ def main():
                     #print(pred[0,0].item())
             if i > 0 and i % chattiness == 0:
                 avg_loss = avg.item() / chattiness
-                print(i, tokens_seen, avg_loss)
+                print(i, avg_loss)
                 avg = torch.tensor(0.0).to(device)
                 if avg_loss < 4.7 and not switched:
                     print('Switching optimizer')
@@ -326,7 +202,7 @@ def main():
                     optimizer = torch.optim.Adam(model.parameters(), lr=0.00001)
     finally:
         end_time = time.monotonic()
-        print(f'Time taken: {end_time - start_time}. {tokens_seen/(end_time-start_time)} tokens/second')
+        print(f'Time taken: {end_time - start_time}')
         torch.save(model.state_dict(), 'data/model.pth')
         print("Saved model")
         window = np.zeros((window_size,), dtype='int32')
