@@ -227,7 +227,7 @@ def load_vocab():
 def predict():
     model = MyTransformer()
     model.load_state_dict(torch.load('data/model.pth'))
-    temperature = 1 #float(input("Temperature: ") or '1')
+    temperature = 0.65 #float(input("Temperature: ") or '1')
     prompt = input("Enter prompt: ")
     vocab = load_vocab()
 
