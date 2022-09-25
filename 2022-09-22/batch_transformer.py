@@ -9,11 +9,11 @@ import time
 import sys
 
 window_size = 32
-embedding_size = 28
-index_size = 4
-vocab_size = 16384
+embedding_size = 24
+index_size = 8
+vocab_size = 8192
 n_heads = 4
-n_layers = 12
+n_layers = 8
 t_key_size = 8
 t_value_size = 8
 batch_size = 64
@@ -214,7 +214,7 @@ def load_vocab():
 def predict():
     model = MyTransformer()
     model.load_state_dict(torch.load('data/model.pth'))
-    temperature = float(input("Temperature: ") or '1')
+    temperature = 1 #float(input("Temperature: ") or '1')
     prompt = input("Enter prompt: ")
     vocab = load_vocab()
 

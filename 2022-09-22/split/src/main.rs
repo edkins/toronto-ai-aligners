@@ -50,7 +50,7 @@ impl Trie {
 
 fn main() {
     println!("Building trie");
-    let words:Vec<_> = fs::read_to_string("../data/vocab_enwik9.txt").unwrap().split('\n').map(|w|w.to_owned()).take(16000).collect();
+    let words:Vec<_> = fs::read_to_string("../data/vocab_enwik9.txt").unwrap().split('\n').map(|w|w.to_owned()).take(8192-256).collect();
     let mut trie = Trie::new();
     for b in 0..=255 {
         trie.insert(&[b], b as u16);
