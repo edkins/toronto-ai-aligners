@@ -2,7 +2,7 @@ use nom::{
     branch::alt,
     bytes::complete::tag,
     character::complete::{anychar, satisfy},
-    combinator::{recognize, value},
+    combinator::{recognize, map, value},
     multi::{many0, many1},
     sequence::{delimited, preceded},
     IResult,
@@ -35,20 +35,36 @@ fn plain(i: &str) -> IResult<&str, &str> {
     )))(i)
 }
 
-fn plain_or_quote(i: &str) -> IResult<&str, &str> {
-    recognize(many1(satisfy(
-        |c| matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | ' ' | '\n' | ',' | '.' | '(' | ')' | ':' | '-' | '!' | '/' | '\''),
-    )))(i)
+fn link_contents(i: &str) -> IResult<&str, &str> {
+    recognize(many1(satisfy(|c| !matches!(c, ']' | '|' | '['))))(i)
 }
 
-fn plain_or_vbar(i: &str) -> IResult<&str, &str> {
-    recognize(many1(satisfy(
-        |c| matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | ' ' | '\n' | ',' | '.' | '(' | ')' | ':' | '-' | '!' | '/' | '\'' | '|'),
-    )))(i)
+fn url_contents(i: &str) -> IResult<&str, &str> {
+    recognize(many1(satisfy(|c| !matches!(c, ']' | ' ' | '['))))(i)
+}
+
+fn image_contents(i: &str) -> IResult<&str, &str> {
+    value("", many1(satisfy(|c| !matches!(c, ']' | '['))))(i)
+}
+
+fn image_items(i: &str) -> IResult<&str, &str> {
+    value("", many1(alt((image_contents, plain_link, named_link))))(i)
+}
+
+fn template_contents(i: &str) -> IResult<&str, &str> {
+    value("", many1(satisfy(|c| !matches!(c, '}' | '{' | '&'))))(i)
+}
+
+fn template_items(i: &str) -> IResult<&str, &str> {
+    value("", many1(alt((template_contents, template, table, nowiki, reference, entity))))(i)
 }
 
 fn bold_or_italic(i: &str) -> IResult<&str, &str> {
     value("", alt((tag("'''"), tag("''"))))(i)
+}
+
+fn heading(i: &str) -> IResult<&str, &str> {
+    value("", preceded(tag("="), many1(tag("="))))(i)
 }
 
 fn entity(i: &str) -> IResult<&str, &str> {
@@ -60,39 +76,54 @@ fn entity(i: &str) -> IResult<&str, &str> {
     ))(i)
 }
 
+fn nowiki_contents(i: &str) -> IResult<&str, &str> {
+    recognize(many1(satisfy(|c| !matches!(c, '&'))))(i)
+}
+
+fn nowiki(i: &str) -> IResult<&str, &str> {
+    delimited(tag("&lt;nowiki&gt;"), nowiki_contents, tag("&lt;/nowiki&gt;"))(i)
+}
+
+fn reference(i: &str) -> IResult<&str, &str> {
+    delimited(tag("&lt;ref&gt;"), nowiki_contents, tag("&lt;ref&gt;"))(i)
+}
+
 fn image(i: &str) -> IResult<&str, &str> {
-    value("", delimited(alt((tag("[[image:"), tag("[[Image:"))), plain_or_vbar, tag("]]")))(i)
+    value("", delimited(alt((tag("[[image:"), tag("[[Image:"))), image_items, tag("]]")))(i)
 }
 
 fn plain_link(i: &str) -> IResult<&str, &str> {
-    delimited(tag("[["), plain_or_quote, tag("]]"))(i)
+    map(delimited(tag("[["), link_contents, tag("]]")), |text| if text.contains(":") {""} else {text})(i)
 }
 
 fn named_link(i: &str) -> IResult<&str, &str> {
     let (i, _) = tag("[[")(i)?;
-    let (i, _) = plain(i)?;
+    let (i, _) = link_contents(i)?;
     let (i, _) = tag("|")(i)?;
-    let (i, result) = plain_or_quote(i)?;
+    let (i, result) = link_contents(i)?;
     let (i, _) = tag("]]")(i)?;
     Ok((i, result))
 }
 
 fn url(i: &str) -> IResult<&str, &str> {
-    recognize(preceded(alt((tag("http://"), tag("https://"))),
-        many1(satisfy(|c| matches!(c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '.' | '-' | '/' | '~' | '#' | '?' | '=' | '&' | '_')))))(i)
+    recognize(preceded(alt((tag("http://"), tag("https://"))), url_contents))(i)
 }
 
 fn url_link(i: &str) -> IResult<&str, &str> {
     let (i, _) = tag("[")(i)?;
     let (i, _) = url(i)?;
     let (i, _) = tag(" ")(i)?;
-    let (i, result) = plain(i)?;
+    let (i, result) = link_contents(i)?;
     let (i, _) = tag("]")(i)?;
     Ok((i, result))
 }
 
 fn template(i: &str) -> IResult<&str, &str> {
-    value("", delimited(tag("{{"), plain_or_vbar, tag("}}")))(i)
+    value("", delimited(tag("{{"), template_items, tag("}}")))(i)
+}
+
+fn table(i: &str) -> IResult<&str, &str> {
+    value("", delimited(tag("{|"), template_items, tag("}")))(i)
 }
 
 fn character(i: &str) -> IResult<&str, &str> {
@@ -100,7 +131,7 @@ fn character(i: &str) -> IResult<&str, &str> {
 }
 
 fn item(i: &str) -> IResult<&str, &str> {
-    alt((plain, bold_or_italic, entity, image, plain_link, named_link, url_link, template, character))(i)
+    alt((plain, bold_or_italic, heading, nowiki, reference, entity, image, plain_link, named_link, url_link, template, table, character))(i)
 }
 
 fn strip_wikitext(input: &str) -> Option<String> {

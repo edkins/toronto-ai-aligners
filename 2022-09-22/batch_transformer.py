@@ -1,5 +1,5 @@
 import numpy as np
-from torch.nn import Module, Embedding, Sequential, Linear, Flatten, Conv1d, ReLU, Unflatten, Softmax, CrossEntropyLoss, ModuleList, NLLLoss, Dropout, LogSoftmax
+from torch.nn import Module, Embedding, Sequential, Linear, Flatten, Conv1d, ReLU, Unflatten, Softmax, CrossEntropyLoss, ModuleList, NLLLoss, Dropout, LogSoftmax, L1Loss
 from torch.nn.parameter import Parameter
 import torch
 import random
@@ -8,11 +8,11 @@ import itertools
 import time
 import sys
 
-window_size = 64
-embedding_size = 240
+window_size = 32
+embedding_size = 112
 index_size = 16
-vocab_size = 8192
-n_heads = 1
+vocab_size = 4096
+n_heads = 2
 n_layers = 4
 t_key_size = 32
 t_value_size = 64
@@ -62,7 +62,7 @@ class TransformerLayer(Module):
 class MyTransformer(Module):
     def __init__(self):
         super().__init__()
-        self.embed = Embedding(num_embeddings=vocab_size, embedding_dim=embedding_size)
+        self.embed = Embedding(num_embeddings=vocab_size + 2, embedding_dim=embedding_size-2)
         self.index = Parameter(torch.rand((1, window_size, index_size)))
         self.dropout = Dropout(p=0.1)
         layers = []
@@ -70,36 +70,22 @@ class MyTransformer(Module):
         for i in range(n_layers):
             layers.append(TransformerLayer(in_size))
         self.layers = Sequential(*layers)
-        self.deembed = Linear(in_size, vocab_size)
-        #self.addvec = Parameter(torch.rand(vocab_size,))
+        self.deembed = Linear(in_size, 4 * vocab_size)
 
     def forward(self, x):
-        x = torch.cat([self.embed(x), self.index.tile(x.shape[0], 1, 1)], dim=2)
+        space = (x & 1).reshape(x.shape[0], x.shape[1], 1)
+        capital = ((x & 2) // 2).reshape(x.shape[0], x.shape[1], 1)
+        x = torch.cat([self.embed(x//4), space, capital, self.index.tile(x.shape[0], 1, 1)], dim=2)
         x = self.dropout(x)
         x = self.layers(x)
         x = self.deembed(x)
-        #x = x[:,:,:embedding_size].matmul(self.embed.weight.T) + self.addvec
         return x
 
 
 def main():
     tokens = np.fromfile('data/tokens_enwik9', dtype='uint16')
     #tokens = np.fromfile('data/stripped_enwik9.txt', dtype='uint8')
-    vocab = []
-    for i in range(256):
-        vocab.append(i.to_bytes(1, byteorder='little'))
-
-    stop_word = None
-    with open('data/vocab_enwik9.txt') as f:
-        vocab_text = f.read()
-        for i,word in enumerate(vocab_text.split('\n')):
-            vocab.append(word.encode('utf-8'))
-            if word == '########':
-                stop_word = len(vocab)
-            if i > vocab_size:
-                break
-    while len(vocab) < 65536:
-        vocab.append(b"[INVALID]")
+    vocab = load_vocab()
 
     #weights = 1 + np.histogram(tokens, bins=vocab_size, range=(0, vocab_size-1))[0].astype('float32')
     #weights[0] += 30000000    # training process introduces zeros
@@ -142,7 +128,7 @@ def main():
             X = torch.tensor(np.array(Xs)).to(device)
             y = torch.tensor(np.array(ys)).to(device)
             pred = model(X)
-            loss = loss_fn(pred.reshape(batch_size * window_size, vocab_size), y.reshape(batch_size * window_size))
+            loss = loss_fn(pred.reshape(batch_size * window_size, 4 * vocab_size), y.reshape((batch_size * window_size,)))
             optimizer.zero_grad()
             loss.backward()
             if i > 0 and i % chattiness == 0:
@@ -164,7 +150,8 @@ def main():
                 for p in X.to('cpu').numpy()[0]:
                     output += vocab[p]
                 print(bytes(output))
-                sortable = list(enumerate(pred[0].to('cpu').detach().numpy()[window_size-1]))
+                preds = pred[0].to('cpu').detach().numpy()[window_size-1]
+                sortable = list(enumerate(preds))
                 sortable.sort(key=lambda pair:pair[1], reverse=True)
                 for t,prob in sortable[:20]:
                     print('    ', vocab[t],prob)
@@ -185,12 +172,14 @@ def main():
             window[0] = 256
             nxt = 0 #window_size-1
             for i in range(100):
-                ys = model(torch.tensor(window.reshape(1,window_size)).to(device))[0]
+                ys = model(torch.tensor(window.reshape(1,window_size)).to(device))[0][nxt]
                 #print(window)
                 #print(ys.argmax(dim=1))
                 #print(ys[nxt])
-                eps = np.exp(ys[nxt].to('cpu').detach().numpy())
-                pred = random.choices(range(vocab_size), weights=eps, k=1)[0]
+                space = random.random() < ys[vocab_size]
+                capital = random.random() < ys[vocab_size+1]
+                eps = np.exp(ys.to('cpu').detach().numpy())
+                pred = random.choices(range(4*vocab_size), weights=eps, k=1)[0]
                 #pred = ys[nxt].argmax().item()
                 output += vocab[pred]
                 if nxt == window_size - 1:
@@ -211,14 +200,24 @@ def main():
         print(outp[0,:,0])
         print(outp2[0,:,0])
 
+def append_vocab(vocab, word):
+    vocab.append(word)
+    vocab.append(b' ' + word)
+    if word[0] >= 97 and word[0] <= 122:
+        capital = (word[0] - 32).to_bytes(1, byteorder='little') + word[1:]
+    else:
+        capital = word
+    vocab.append(capital)
+    vocab.append(b' ' + capital)
+
 def load_vocab():
     vocab = []
     for i in range(256):
-        vocab.append(i.to_bytes(1, byteorder='little'))
+        append_vocab(vocab, i.to_bytes(1, byteorder='little'))
     with open('data/vocab_enwik9.txt') as f:
         vocab_text = f.read()
         for i,word in enumerate(vocab_text.split('\n')):
-            vocab.append(word.encode('utf-8'))
+            append_vocab(vocab, word.encode('utf-8'))
             if i > vocab_size:
                 break
     while len(vocab) < vocab_size:
@@ -254,7 +253,7 @@ def predict():
             x[0,:] = tokens[-window_size:]
             pos = window_size-1
         y = model(torch.tensor(x)).detach().numpy()
-        next_token = random.choices(range(vocab_size), weights=np.exp(y[0,pos] / temperature), k=1)[0]
+        next_token = random.choices(range(4*vocab_size), weights=np.exp(y[0,pos] / temperature), k=1)[0]
         tokens.append(next_token)
         output += vocab[next_token]
     print(bytes(output))

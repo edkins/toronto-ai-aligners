@@ -48,9 +48,34 @@ impl Trie {
     }
 }
 
+fn canonicalize(mut word: &[u8]) -> (Vec<u8>, bool, bool) {
+    if word.len() <= 1 {
+        return (word.to_vec(), false, false);
+    }
+    let mut space = false;
+    let mut capital = false;
+    let mut result = vec![];
+    if word[0] == b' ' {
+        word = &word[1..];
+        space = true;
+    }
+    let mut first = true;
+    for ch in word {
+        if first && *ch >= b'A' && *ch <= b'Z' {
+            result.push(*ch + 32);
+            capital = true;
+        } else {
+            result.push(*ch);
+        }
+        first = false;
+    }
+    (result, space, capital)
+}
+
+
 fn main() {
     println!("Building trie");
-    let words:Vec<_> = fs::read_to_string("../data/vocab_enwik9.txt").unwrap().split('\n').map(|w|w.to_owned()).take(8192-256).collect();
+    let words:Vec<_> = fs::read_to_string("../data/vocab_enwik9.txt").unwrap().split('\n').map(|w|w.to_owned()).take(4096-256).collect();
     let mut trie = Trie::new();
     for b in 0..=255 {
         trie.insert(&[b], b as u16);
@@ -70,9 +95,14 @@ fn main() {
         if i >= text.len() {
             break;
         }
-        let (len,v) = trie.scan(&text[i..]).unwrap();
-        output.extend_from_slice(&v.to_le_bytes());
+        let (word, space, capital) = canonicalize(&text[i..(i+32).min(text.len())]);
+        let (len,v) = trie.scan(&word).unwrap();
+        let value = v * 4 + (if space {1} else {0}) + (if capital {2} else {0});
+        output.extend_from_slice(&value.to_le_bytes());
         i += len;
+        if space {
+            i += 1;
+        }
         while i > j {
             println!("{j}");
             j += 1000000;

@@ -2,9 +2,9 @@ use nom::{
     IResult,
     branch::alt,
     bytes::complete::{tag, take_while, take},
-    combinator::{recognize, verify},
+    combinator::{opt, recognize, verify},
     multi::many0,
-    sequence::preceded,
+    sequence::tuple,
 };
 use std::collections::HashMap;
 use std::fs;
@@ -14,10 +14,11 @@ fn article_separator(i: &[u8]) -> IResult<&[u8], &[u8]> {
 }
 
 fn word(i: &[u8]) -> IResult<&[u8], &[u8]> {
-    recognize(preceded(
-        verify(byte, |c:&[u8]|matches!(c[0], b' ' | b'a'..=b'z' | b'A'..=b'Z')),
+    recognize(tuple((
+        opt(tag(b" ")),
+        verify(byte, |c:&[u8]|matches!(c[0],  b'a'..=b'z' | b'A'..=b'Z')),
         take_while(|c| matches!(c, b'a'..=b'z')),
-    ))(i)
+    )))(i)
 }
 
 fn byte(i: &[u8]) -> IResult<&[u8], &[u8]> {
@@ -28,6 +29,24 @@ fn item(i: &[u8]) -> IResult<&[u8], &[u8]> {
     alt((word, article_separator, byte))(i)
 }
 
+fn canonicalize(mut word: &[u8]) -> Vec<u8> {
+    if word.len() <= 1 {
+        return word.to_vec();
+    }
+    let mut result = vec![];
+    if word[0] == b' ' {
+        word = &word[1..];
+    }
+    for ch in word {
+        if *ch >= b'A' && *ch <= b'Z' {
+            result.push(*ch + 32);
+        } else {
+            result.push(*ch);
+        }
+    }
+    result
+}
+
 fn main() {
     let bytes = fs::read("../data/stripped_enwik9.txt").unwrap();
     let mut freqs = HashMap::new();
@@ -35,7 +54,7 @@ fn main() {
     let (_,words) = many0(item)(&bytes).unwrap();
     println!("Computing word frequencies. {} words", words.len());
     for (i,word) in words.iter().enumerate() {
-        *freqs.entry(word.to_vec()).or_insert(0u64) += 1;
+        *freqs.entry(canonicalize(word)).or_insert(0u64) += 1;
         if i > 0 && i % 1000000 == 0 {
             println!("{i}");
         }
