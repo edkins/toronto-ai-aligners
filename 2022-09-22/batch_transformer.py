@@ -8,14 +8,14 @@ import itertools
 import time
 import sys
 
-window_size = 32
-embedding_size = 24
-index_size = 8
+window_size = 64
+embedding_size = 240
+index_size = 16
 vocab_size = 8192
-n_heads = 4
-n_layers = 8
-t_key_size = 8
-t_value_size = 8
+n_heads = 1
+n_layers = 4
+t_key_size = 32
+t_value_size = 64
 batch_size = 64
 
 class AttentionHead(Module):
@@ -23,7 +23,7 @@ class AttentionHead(Module):
         super().__init__()
         self.wk = Linear(in_size, key_size)
         self.wv = Linear(in_size, value_size)
-        self.wq = Linear(in_size, key_size)
+        self.wq = Linear(in_size, key_size, bias=False)
         tri = (np.tril(np.full((window_size, window_size),2.0, dtype='float32')) - 1) * 100000.0
         self.tri = Parameter(torch.tensor(tri.reshape((1, window_size, window_size))), requires_grad=False)
         self.scale = t_key_size ** -0.5
@@ -71,12 +71,14 @@ class MyTransformer(Module):
             layers.append(TransformerLayer(in_size))
         self.layers = Sequential(*layers)
         self.deembed = Linear(in_size, vocab_size)
+        #self.addvec = Parameter(torch.rand(vocab_size,))
 
     def forward(self, x):
         x = torch.cat([self.embed(x), self.index.tile(x.shape[0], 1, 1)], dim=2)
         x = self.dropout(x)
         x = self.layers(x)
         x = self.deembed(x)
+        #x = x[:,:,:embedding_size].matmul(self.embed.weight.T) + self.addvec
         return x
 
 
@@ -143,6 +145,18 @@ def main():
             loss = loss_fn(pred.reshape(batch_size * window_size, vocab_size), y.reshape(batch_size * window_size))
             optimizer.zero_grad()
             loss.backward()
+            if i > 0 and i % chattiness == 0:
+                sd = model.state_dict()
+                params = model.parameters()
+                for param,val in zip(sd, params):
+                    if val.grad is not None and len(val.shape) == 1:
+                        print(param, torch.linalg.vector_norm(val.grad).item())
+                        #print(val.grad)
+                    elif val.grad is not None and len(val.shape) == 2:
+                        print(param, torch.linalg.matrix_norm(val.grad).item())
+                        #print(val.grad)
+                    else:
+                        print(param)
             optimizer.step()
             avg += loss.detach()
             if i > 0 and i % chattiness == 0:
@@ -156,7 +170,7 @@ def main():
                     print('    ', vocab[t],prob)
 
             if i > 0 and i % chattiness == 0:
-                print(i, tokens_seen, avg.item() / chattiness)
+                print(i, tokens_seen, avg.item() / chattiness, f'     {int(time.monotonic()-start_time)} seconds')
                 avg *= 0
     finally:
         end_time = time.monotonic()
