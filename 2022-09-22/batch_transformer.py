@@ -157,7 +157,7 @@ def main():
                     print('    ', vocab[t],prob)
 
             if i > 0 and i % chattiness == 0:
-                print(i, tokens_seen, avg.item() / chattiness, f'     {int(time.monotonic()-start_time)} seconds')
+                print(i, f'{tokens_seen/1000000}m tokens seen', avg.item() / chattiness, f'     {int(time.monotonic()-start_time)} seconds')
                 avg *= 0
     finally:
         end_time = time.monotonic()
@@ -258,8 +258,58 @@ def predict():
         output += vocab[next_token]
     print(bytes(output))
 
+def analyze():
+    model = MyTransformer()
+    model.load_state_dict(torch.load('data/model.pth'))
+    x0 = model.embed.weight.detach().numpy()[:vocab_size,:]
+    print(x0.shape)
+    xk = model.layers[0].heads[0].wq.weight.detach().numpy()[:,:embedding_size-2]
+    xq = model.layers[0].heads[0].wq.weight.detach().numpy()[:,:embedding_size-2]
+    #show_embed(np.matmul(x0,xk.T), 30)
+    xk1 = np.matmul(x0,xk.T)
+    xq1 = np.matmul(x0,xq.T)
+    xk2 = xk1 / np.linalg.norm(xk1, axis=1).reshape(vocab_size, 1) 
+    xq2 = xq1 / np.linalg.norm(xq1, axis=1).reshape(vocab_size, 1) 
+    dots = np.matmul(xk2, xq2.T)
+    matrix = np.arccos(np.minimum(1, np.maximum(-1, np.maximum(dots, dots.T))))
+    print(matrix.min(), matrix.max())
+    show_embed(matrix, 30, 'precomputed')
+
+def show_embed(X, perplexity=30, reduction='tsne'):
+    from sklearn.manifold import TSNE
+    from sklearn.decomposition import PCA
+    vocab = load_vocab();
+    if reduction == 'tsne':
+        reduc = TSNE(verbose=2, perplexity=perplexity)
+    elif reduction == 'precomputed':
+        reduc = TSNE(verbose=2, perplexity=perplexity, metric='precomputed')
+    else:
+        reduc = PCA(2)
+
+    if X.shape[1] == 2:
+        points = X
+    else:
+        points = reduc.fit_transform(X)
+    doc = ['<?xml version="1.0"?>\n','<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000">\n']
+    size = max(abs(points[:,0].max()), abs(points[:,1].max()), abs(points[:,0].min()), abs(points[:,1].min()))
+    for i,(x,y) in enumerate(points):
+        px = 500 + 500 * x / size
+        py = 500 + 500 * y / size
+        j = 4 * i
+        tsize = 100 * ((i + 256) ** -0.5)
+        if len(vocab[j]) > 1 or (32 <= vocab[j][0] <= 126 and vocab[j] not in [b'"', b'&', b'<', b'>']):
+            try:
+                doc.append(f'<text font-size="{tsize}px" x="{px}" y="{py}">{vocab[j].decode("utf-8")}</text>\n')
+            except:
+                pass
+    doc.append('</svg>')
+    with open('data/graph.svg','w') as f:
+        f.write(''.join(doc))
+
 if __name__ == '__main__':
     if sys.argv[1] == 'train':
         main()
     elif sys.argv[1] == 'eval':
         predict()
+    elif sys.argv[1] == 'analyze':
+        analyze()
