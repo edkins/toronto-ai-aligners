@@ -21,13 +21,13 @@ t_value_size = 64
 batch_size = 64
 
 class AttentionHead(Module):
-    def __init__(self, in_size, value_size, key_size):
+    def __init__(self, in_size, value_size, key_size, device):
         super().__init__()
         self.wk = Linear(in_size, key_size)
         self.wv = Linear(in_size, value_size)
         self.wq = Linear(in_size, key_size, bias=False)
         tri = (np.tril(np.full((window_size, window_size),2.0, dtype='float32')) - 1) * 100000.0
-        self.tri = torch.tensor(tri.reshape((1, window_size, window_size))).to(torch.device('cuda'))
+        self.tri = torch.tensor(tri.reshape((1, window_size, window_size))).to(torch.device(device))
         self.scale = t_key_size ** -0.5
 
     def forward(self, x):
@@ -39,9 +39,9 @@ class AttentionHead(Module):
         return result
 
 class TransformerLayer(Module):
-    def __init__(self, in_out_size):
+    def __init__(self, in_out_size, device):
         super().__init__()
-        self.heads = ModuleList([AttentionHead(in_out_size, t_value_size, t_key_size) for _ in range(n_heads)])
+        self.heads = ModuleList([AttentionHead(in_out_size, t_value_size, t_key_size, device) for _ in range(n_heads)])
         self.dropout = Dropout(p=0.1)
         self.linear = Linear(t_value_size * n_heads, in_out_size)
         self.linear2 = Linear(in_out_size, in_out_size)
@@ -54,23 +54,23 @@ class TransformerLayer(Module):
         y = torch.cat([self.heads[i](x) for i in range(n_heads)], dim=2)
         y = self.linear(y)
         y = self.dropout(y)
-        y = torch.nn.functional.layer_norm(x + y, (self.in_out_size,))
+        y = x + torch.nn.functional.layer_norm(y, (self.in_out_size,))
         z = self.linear2(y)
         z = self.relu(z)
         z = self.linear3(z)
-        z = self.dropout(z)
-        return torch.nn.functional.layer_norm(y + z, (self.in_out_size,))
+        z = self.dropout2(z)
+        return y + torch.nn.functional.layer_norm(z, (self.in_out_size,))
 
 class MyTransformer(Module):
-    def __init__(self):
+    def __init__(self, device='cuda'):
         super().__init__()
         self.embed = Embedding(num_embeddings=vocab_size + 2, embedding_dim=embedding_size-2)
-        self.index = Parameter(torch.rand((1, window_size, index_size)))
+        self.index = Parameter(torch.rand((1, window_size, index_size)) - 0.5)
         self.dropout = Dropout(p=0.1)
         layers = []
         in_size = embedding_size + index_size
         for i in range(n_layers):
-            layers.append(TransformerLayer(in_size))
+            layers.append(TransformerLayer(in_size, device))
         self.layers = Sequential(*layers)
         self.deembed = Linear(in_size, 4 * vocab_size)
 
@@ -97,8 +97,8 @@ def main():
     device = torch.device('cuda')
     model = MyTransformer().to(device)
     loss_fn = CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=3e-3, weight_decay=1e-5)
-    #optimizer = torch.optim.SGD(model.parameters(), lr=3e-3, weight_decay=1e-5)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-2, weight_decay=1e-8)
+    #optimizer = torch.optim.SGD(model.parameters(), lr=3e-4, weight_decay=1e-7)
     opt_version = 0
     total = 0
     for p in model.parameters():
@@ -142,23 +142,27 @@ def main():
             loss = loss_fn(pred.reshape(batch_size * window_size, 4 * vocab_size), y.reshape((batch_size * window_size,)))
             optimizer.zero_grad()
             loss.backward()
-            if i > 0 and i % chattiness == 0:
-                sd = model.state_dict()
-                params = model.parameters()
-                for param,val in zip(sd, params):
-                    if val.grad is not None and len(val.shape) == 1:
-                        print(param, torch.linalg.vector_norm(val.grad).item())
-                        #print(val.grad)
-                    elif val.grad is not None and len(val.shape) == 2:
-                        print(param, torch.linalg.matrix_norm(val.grad).item())
-                        #print(val.grad)
-                    else:
-                        print(param)
+            #if i > 0 and i % chattiness == 0:
+            #    sd = model.state_dict()
+            #    params = model.parameters()
+            #    for param,val in zip(sd, params):
+            #        if val.grad is not None and len(val.shape) == 1:
+            #            print(param, torch.linalg.vector_norm(val.grad).item())
+            #            #print(val.grad)
+            #        elif val.grad is not None and len(val.shape) == 2:
+            #            print(param, torch.linalg.matrix_norm(val.grad).item())
+            #            #print(val.grad)
+            #        else:
+            #            print(param)
             optimizer.step()
             avg += loss.detach()
             if i % 64 == 0:
                 imager.extend_from_model(model)
+                if (i // 64) % 16 == 0:
+                    imager.draw_loss(loss.item())
             if i > 0 and i % chattiness == 0:
+                print(model.embed.weight)
+                print(torch.linalg.vector_norm(model.embed.weight.grad).item())
                 output = bytearray()
                 for p in X.to('cpu').numpy()[0]:
                     output += vocab[p]
@@ -240,7 +244,7 @@ def load_vocab():
     return vocab
 
 def predict():
-    model = MyTransformer()
+    model = MyTransformer('cpu')
     model.load_state_dict(torch.load('data/model.pth'))
     temperature = 0.65 #float(input("Temperature: ") or '1')
     prompt = input("Enter prompt: ")
@@ -277,14 +281,20 @@ def analyze():
     model = MyTransformer()
     model.load_state_dict(torch.load('data/model.pth'))
     x0 = model.embed.weight.detach().numpy()[:vocab_size,:]
+    show_embed(x0, 30)
+
+def analyze1():
+    model = MyTransformer()
+    model.load_state_dict(torch.load('data/model.pth'))
+    x0 = model.embed.weight.detach().numpy()[:vocab_size,:]
     print(x0.shape)
     xk = model.layers[0].heads[0].wq.weight.detach().numpy()[:,:embedding_size-2]
     xq = model.layers[0].heads[0].wq.weight.detach().numpy()[:,:embedding_size-2]
     #show_embed(np.matmul(x0,xk.T), 30)
     xk1 = np.matmul(x0,xk.T)
     xq1 = np.matmul(x0,xq.T)
-    xk2 = xk1 / np.linalg.norm(xk1, axis=1).reshape(vocab_size, 1) 
-    xq2 = xq1 / np.linalg.norm(xq1, axis=1).reshape(vocab_size, 1) 
+    xk2 = xk1 / (0.00001 + np.linalg.norm(xk1, axis=1)).reshape(vocab_size, 1) 
+    xq2 = xq1 / (0.00001 + np.linalg.norm(xq1, axis=1)).reshape(vocab_size, 1) 
     dots = np.matmul(xk2, xq2.T)
     matrix = np.arccos(np.minimum(1, np.maximum(-1, np.maximum(dots, dots.T))))
     print(matrix.min(), matrix.max())
@@ -328,3 +338,5 @@ if __name__ == '__main__':
         predict()
     elif sys.argv[1] == 'analyze':
         analyze()
+    elif sys.argv[1] == 'analyze1':
+        analyze1()

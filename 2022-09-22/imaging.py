@@ -1,7 +1,7 @@
 import itertools
 import random
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 
 def values_to_rgb(values):
     intensity = np.minimum(np.log1p(np.abs(values)), 1)
@@ -40,6 +40,7 @@ class Imager:
         self.im = Image.new('RGB', (width,0), (255,255,255))
         self.filename = filename
         self.segments = segments
+        self.drawn_labels = False
 
     def extend(self, values):
         rgb = values_to_rgb(values)
@@ -52,6 +53,25 @@ class Imager:
         new_im.paste(self.im, (0,0))
         new_im.paste(extra, (0,h0))
         self.im = new_im
+        if self.im.height >= 12 and not self.drawn_labels:
+            self.draw_labels()
+            self.drawn_labels = True
+
+    def abbreviate(self, key):
+        return key.replace('layers.','').replace('heads.','').replace('weight','w').replace('bias','b')
+
+    def draw_labels(self):
+        print("Drawing labels")
+        offset = 0
+        draw = ImageDraw.Draw(self.im)
+        for key, indices in self.segments:
+            draw.text((offset,0), self.abbreviate(key), fill=(0,0,0))
+            offset += len(indices)
+
+    def draw_loss(self, loss):
+        print("Drawing loss")
+        draw = ImageDraw.draw(self.im)
+        draw.text((0,im.height-8), str(loss))
 
     def save(self):
         self.im.save(self.filename)
