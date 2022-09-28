@@ -8,6 +8,8 @@ import itertools
 import time
 import sys
 
+import imaging
+
 window_size = 32
 embedding_size = 112
 index_size = 16
@@ -25,7 +27,7 @@ class AttentionHead(Module):
         self.wv = Linear(in_size, value_size)
         self.wq = Linear(in_size, key_size, bias=False)
         tri = (np.tril(np.full((window_size, window_size),2.0, dtype='float32')) - 1) * 100000.0
-        self.tri = Parameter(torch.tensor(tri.reshape((1, window_size, window_size))), requires_grad=False)
+        self.tri = torch.tensor(tri.reshape((1, window_size, window_size))).to(torch.device('cuda'))
         self.scale = t_key_size ** -0.5
 
     def forward(self, x):
@@ -95,11 +97,15 @@ def main():
     device = torch.device('cuda')
     model = MyTransformer().to(device)
     loss_fn = CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(model.parameters(), lr=3e-3, weight_decay=1e-5)
+    #optimizer = torch.optim.SGD(model.parameters(), lr=3e-3, weight_decay=1e-5)
+    opt_version = 0
     total = 0
     for p in model.parameters():
         total += np.product(p.shape)
     print(f'{total} parameters')
+
+    imager = imaging.Imager('data/params.png', segments=imaging.choose_segments(model, 256))
 
     chattiness = 200
     avg = torch.tensor(0.0).to(device)
@@ -107,9 +113,14 @@ def main():
     start_time = time.monotonic()
     try:
         for i in range(1000000):
-            #if i == 10000:
+            #if opt_version == 0 and tokens_seen > 2_000_000:
             #    print('Switching optimizer')
-            #    optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)
+            #    optimizer = torch.optim.Adam(model.parameters(), lr=1e-2, weight_decay=1e-5)
+            #    opt_version = 1
+            #if opt_version == 1 and tokens_seen > 10_000_000:
+            #    print('Switching optimizer again')
+            #    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-5)
+            #    opt_version = 2
             index = random.randrange(0, len(tokens) - window_size - 1)
             Xs = []
             ys = []
@@ -145,6 +156,8 @@ def main():
                         print(param)
             optimizer.step()
             avg += loss.detach()
+            if i % 64 == 0:
+                imager.extend_from_model(model)
             if i > 0 and i % chattiness == 0:
                 output = bytearray()
                 for p in X.to('cpu').numpy()[0]:
@@ -156,9 +169,11 @@ def main():
                 for t,prob in sortable[:20]:
                     print('    ', vocab[t],prob)
 
-            if i > 0 and i % chattiness == 0:
                 print(i, f'{tokens_seen/1000000}m tokens seen', avg.item() / chattiness, f'     {int(time.monotonic()-start_time)} seconds')
                 avg *= 0
+
+                imager.save()
+
     finally:
         end_time = time.monotonic()
         print(f'Time taken: {end_time - start_time}. {tokens_seen/(end_time-start_time)} tokens/second')
