@@ -54,12 +54,12 @@ class TransformerLayer(Module):
         y = torch.cat([self.heads[i](x) for i in range(n_heads)], dim=2)
         y = self.linear(y)
         y = self.dropout(y)
-        y = x + torch.nn.functional.layer_norm(y, (self.in_out_size,))
+        y = x + torch.nn.functional.layer_norm(y, (self.in_out_size,), eps=1e-3)
         z = self.linear2(y)
         z = self.relu(z)
         z = self.linear3(z)
         z = self.dropout2(z)
-        return y + torch.nn.functional.layer_norm(z, (self.in_out_size,))
+        return y + torch.nn.functional.layer_norm(z, (self.in_out_size,), eps=1e-3)
 
 class MyTransformer(Module):
     def __init__(self, device='cuda'):
@@ -109,6 +109,7 @@ def main():
 
     chattiness = 200
     avg = torch.tensor(0.0).to(device)
+    avg2 = torch.tensor(0.0).to(device)
     tokens_seen  = 0
     start_time = time.monotonic()
     try:
@@ -156,10 +157,9 @@ def main():
             #            print(param)
             optimizer.step()
             avg += loss.detach()
+            avg2 += loss.detach()
             if i % 64 == 0:
                 imager.extend_from_model(model)
-                if (i // 64) % 16 == 0:
-                    imager.draw_loss(loss.item())
             if i > 0 and i % chattiness == 0:
                 print(model.embed.weight)
                 print(torch.linalg.vector_norm(model.embed.weight.grad).item())
@@ -176,6 +176,9 @@ def main():
                 print(i, f'{tokens_seen/1000000}m tokens seen', avg.item() / chattiness, f'     {int(time.monotonic()-start_time)} seconds')
                 avg *= 0
 
+                if (i // chattiness) % 8 == 0:
+                    imager.draw_loss(avg2.item() / chattiness / 8)
+                    avg2 *= 0
                 imager.save()
 
     finally:

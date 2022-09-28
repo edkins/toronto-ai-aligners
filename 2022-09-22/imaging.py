@@ -70,8 +70,8 @@ class Imager:
 
     def draw_loss(self, loss):
         print("Drawing loss")
-        draw = ImageDraw.draw(self.im)
-        draw.text((0,im.height-8), str(loss))
+        draw = ImageDraw.Draw(self.im)
+        draw.text((0,self.im.height-10), f'{loss:.3}', fill=(0,0,0))
 
     def save(self):
         self.im.save(self.filename)
