@@ -4,7 +4,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 def values_to_rgb(values):
-    intensity = np.minimum(np.log1p(np.abs(values)), 1)
+    intensity = np.minimum(np.log1p(np.abs(values)) / 4, 1)
     pos = np.maximum(0, np.sign(values))
     neg = np.maximum(0, -np.sign(values))
     r = ((1 - intensity * neg) * 255).astype('uint8')

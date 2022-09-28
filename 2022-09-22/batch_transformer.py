@@ -15,7 +15,7 @@ embedding_size = 112
 index_size = 16
 vocab_size = 4096
 n_heads = 2
-n_layers = 4
+n_layers = 2
 t_key_size = 32
 t_value_size = 64
 batch_size = 64
@@ -72,7 +72,7 @@ class MyTransformer(Module):
         for i in range(n_layers):
             layers.append(TransformerLayer(in_size, device))
         self.layers = Sequential(*layers)
-        self.deembed = Linear(in_size, 4 * vocab_size)
+        self.deembed = Linear(in_size, 4 * vocab_size, bias=False)
 
     def forward(self, x):
         space = (x & 1).reshape(x.shape[0], x.shape[1], 1)
@@ -97,7 +97,7 @@ def main():
     device = torch.device('cuda')
     model = MyTransformer().to(device)
     loss_fn = CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-2, weight_decay=1e-8)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=0)
     #optimizer = torch.optim.SGD(model.parameters(), lr=3e-4, weight_decay=1e-7)
     opt_version = 0
     total = 0
@@ -114,9 +114,9 @@ def main():
     start_time = time.monotonic()
     try:
         for i in range(1000000):
-            #if opt_version == 0 and tokens_seen > 2_000_000:
+            #if opt_version == 0 and tokens_seen > 1_000_000:
             #    print('Switching optimizer')
-            #    optimizer = torch.optim.Adam(model.parameters(), lr=1e-2, weight_decay=1e-5)
+            #    optimizer = torch.optim.Adam(model.parameters(), lr=3e-2, weight_decay=0)
             #    opt_version = 1
             #if opt_version == 1 and tokens_seen > 10_000_000:
             #    print('Switching optimizer again')
