@@ -11,13 +11,13 @@ import sys
 import imaging
 
 window_size = 32
-embedding_size = 112
-index_size = 16
+embedding_size = 56
+index_size = 8
 vocab_size = 4096
 n_heads = 4
 n_layers = 6
-t_key_size = 32
-t_value_size = 64
+t_key_size = 16
+t_value_size = 32
 batch_size = 64
 
 class AttentionHead(Module):
@@ -179,7 +179,7 @@ def main():
                 if (i // chattiness) % 8 == 0:
                     imager.draw_loss(avg2.item() / chattiness / 8)
                     avg2 *= 0
-                imager.save()
+                    imager.save()
 
     finally:
         imager.save()

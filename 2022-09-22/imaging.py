@@ -53,7 +53,7 @@ class Imager:
         self.diff_filename = diff_filename
         self.segments = segments
         self.drawn_labels = False
-        self.prev_values = np.zeros((width,1), 'float32')
+        self.prev_values = None
 
     def extend(self, values):
         rgb = values_to_rgb(values)
@@ -67,8 +67,9 @@ class Imager:
         new_im.paste(extra, (0,h0))
         self.im = new_im
 
-        rgb_diff = diff_values_to_rgb(values[:,0:1] - 0.1 * self.prev_values)
-        self.prev_values = self.prev_values * 0.9 + values[:,0:1]
+        if self.prev_values is None:
+            self.prev_values = values[:,0:1]
+        rgb_diff = diff_values_to_rgb(values[:,0:1] - self.prev_values)
         extra = Image.fromarray(rgb_diff, 'RGB').transpose(Image.Transpose.TRANSPOSE)
         h0 = self.imdiff.height
         new_im = Image.new('RGB', (w0, h0 + 1))
