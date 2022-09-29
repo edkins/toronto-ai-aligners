@@ -23,8 +23,8 @@ batch_size = 64
 class AttentionHead(Module):
     def __init__(self, in_size, value_size, key_size, device):
         super().__init__()
-        self.wk = Linear(in_size, key_size)
-        self.wv = Linear(in_size, value_size)
+        self.wk = Linear(in_size, key_size, bias=False)
+        self.wv = Linear(in_size, value_size, bias=False)
         self.wq = Linear(in_size, key_size, bias=False)
         tri = (np.tril(np.full((window_size, window_size),2.0, dtype='float32')) - 1) * 100000.0
         self.tri = torch.tensor(tri.reshape((1, window_size, window_size))).to(torch.device(device))
@@ -105,7 +105,7 @@ def main():
         total += np.product(p.shape)
     print(f'{total} parameters')
 
-    imager = imaging.Imager('data/params.png', segments=imaging.choose_segments(model, 256))
+    imager = imaging.Imager('data/params.png', 'data/diffs.png', segments=imaging.choose_segments(model, 256))
 
     chattiness = 200
     avg = torch.tensor(0.0).to(device)
@@ -249,7 +249,7 @@ def load_vocab():
 def predict():
     model = MyTransformer('cpu')
     model.load_state_dict(torch.load('data/model.pth'))
-    temperature = 0.65 #float(input("Temperature: ") or '1')
+    temperature = 0.75 #float(input("Temperature: ") or '1')
     prompt = input("Enter prompt: ")
     vocab = load_vocab()
 

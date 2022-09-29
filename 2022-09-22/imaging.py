@@ -4,7 +4,17 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 def values_to_rgb(values):
-    intensity = np.minimum(np.log1p(np.abs(values)) / 4, 1)
+    intensity = np.minimum(np.log1p(np.abs(values * 16)) / 4, 1)
+    pos = np.maximum(0, np.sign(values))
+    neg = np.maximum(0, -np.sign(values))
+    r = ((1 - intensity * neg) * 255).astype('uint8')
+    g = ((1 - intensity) * 255).astype('uint8')
+    b = ((1 - intensity * pos) * 255).astype('uint8')
+    result = np.stack([r,g,b], axis=2)
+    return result
+
+def diff_values_to_rgb(values):
+    intensity = np.minimum(np.log1p(np.abs(values * 16)) / 4, 1)
     pos = np.maximum(0, np.sign(values))
     neg = np.maximum(0, -np.sign(values))
     r = ((1 - intensity * neg) * 255).astype('uint8')
@@ -34,13 +44,16 @@ def segments_width(segments):
     return result
 
 class Imager:
-    def __init__(self, filename, *, width=None, segments=None):
+    def __init__(self, filename, diff_filename, *, width=None, segments=None):
         if width == None:
             width = segments_width(segments)
         self.im = Image.new('RGB', (width,0), (255,255,255))
+        self.imdiff = Image.new('RGB', (width,0), (255,255,255))
         self.filename = filename
+        self.diff_filename = diff_filename
         self.segments = segments
         self.drawn_labels = False
+        self.prev_values = np.zeros((width,1), 'float32')
 
     def extend(self, values):
         rgb = values_to_rgb(values)
@@ -53,6 +66,16 @@ class Imager:
         new_im.paste(self.im, (0,0))
         new_im.paste(extra, (0,h0))
         self.im = new_im
+
+        rgb_diff = diff_values_to_rgb(values[:,0:1] - 0.1 * self.prev_values)
+        self.prev_values = self.prev_values * 0.9 + values[:,0:1]
+        extra = Image.fromarray(rgb_diff, 'RGB').transpose(Image.Transpose.TRANSPOSE)
+        h0 = self.imdiff.height
+        new_im = Image.new('RGB', (w0, h0 + 1))
+        new_im.paste(self.imdiff, (0,0))
+        new_im.paste(extra, (0,h0))
+        self.imdiff = new_im
+
         if self.im.height >= 12 and not self.drawn_labels:
             self.draw_labels()
             self.drawn_labels = True
@@ -64,17 +87,22 @@ class Imager:
         print("Drawing labels")
         offset = 0
         draw = ImageDraw.Draw(self.im)
+        draw2 = ImageDraw.Draw(self.imdiff)
         for key, indices in self.segments:
             draw.text((offset,0), self.abbreviate(key), fill=(0,0,0))
+            draw2.text((offset,0), self.abbreviate(key), fill=(0,0,0))
             offset += len(indices)
 
     def draw_loss(self, loss):
         print("Drawing loss")
         draw = ImageDraw.Draw(self.im)
         draw.text((0,self.im.height-10), f'{loss:.3}', fill=(0,0,0))
+        draw = ImageDraw.Draw(self.imdiff)
+        draw.text((0,self.im.height-10), f'{loss:.3}', fill=(0,0,0))
 
     def save(self):
         self.im.save(self.filename)
+        self.imdiff.save(self.diff_filename)
 
     def extend_from_model(self, model):
         state = model.state_dict()
