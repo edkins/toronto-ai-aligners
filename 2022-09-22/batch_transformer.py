@@ -14,8 +14,8 @@ window_size = 32
 embedding_size = 112
 index_size = 16
 vocab_size = 4096
-n_heads = 2
-n_layers = 2
+n_heads = 4
+n_layers = 6
 t_key_size = 32
 t_value_size = 64
 batch_size = 64
@@ -76,8 +76,8 @@ class MyTransformer(Module):
 
     def forward(self, x):
         space = (x & 1).reshape(x.shape[0], x.shape[1], 1)
-        capital = ((x & 2) // 2).reshape(x.shape[0], x.shape[1], 1)
-        x = torch.cat([self.embed(x//4), space, capital, self.index.tile(x.shape[0], 1, 1)], dim=2)
+        capital = (torch.div((x & 2), 2, rounding_mode='floor')).reshape(x.shape[0], x.shape[1], 1)
+        x = torch.cat([self.embed(torch.div(x,4,rounding_mode='floor')), space, capital, self.index.tile(x.shape[0], 1, 1)], dim=2)
         x = self.dropout(x)
         x = self.layers(x)
         x = self.deembed(x)
@@ -97,7 +97,7 @@ def main():
     device = torch.device('cuda')
     model = MyTransformer().to(device)
     loss_fn = CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=0)
+    optimizer = torch.optim.Adam(model.parameters(), lr=3e-4, weight_decay=0)
     #optimizer = torch.optim.SGD(model.parameters(), lr=3e-4, weight_decay=1e-7)
     opt_version = 0
     total = 0
@@ -182,6 +182,7 @@ def main():
                 imager.save()
 
     finally:
+        imager.save()
         end_time = time.monotonic()
         print(f'Time taken: {end_time - start_time}. {tokens_seen/(end_time-start_time)} tokens/second')
         torch.save(model.state_dict(), 'data/model.pth')
