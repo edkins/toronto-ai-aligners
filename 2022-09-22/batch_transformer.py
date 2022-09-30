@@ -158,11 +158,9 @@ def main():
             optimizer.step()
             avg += loss.detach()
             avg2 += loss.detach()
-            if i % 64 == 0:
-                imager.extend_from_model(model)
             if i > 0 and i % chattiness == 0:
-                print(model.embed.weight)
-                print(torch.linalg.vector_norm(model.embed.weight.grad).item())
+                #print(model.embed.weight)
+                #print(torch.linalg.vector_norm(model.embed.weight.grad).item())
                 output = bytearray()
                 for p in X.to('cpu').numpy()[0]:
                     output += vocab[p]
@@ -176,8 +174,12 @@ def main():
                 print(i, f'{tokens_seen/1000000}m tokens seen', avg.item() / chattiness, f'     {int(time.monotonic()-start_time)} seconds')
                 avg *= 0
 
-                if (i // chattiness) % 8 == 0:
-                    imager.draw_loss(avg2.item() / chattiness / 8)
+                img_row_chattiness = 2
+                img_chattiness = 32
+                if (i // chattiness) % img_row_chattiness == 0:
+                    imager.extend_from_model(model)
+                if (i // chattiness) % img_chattiness == 0:
+                    imager.draw_loss(avg2.item() / chattiness / img_chattiness, time.monotonic() - start_time)
                     avg2 *= 0
                     imager.save()
 

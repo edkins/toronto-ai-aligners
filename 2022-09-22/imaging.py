@@ -69,13 +69,13 @@ class Imager:
 
         if self.prev_values is None:
             self.prev_values = values[:,0:1]
-        rgb_diff = diff_values_to_rgb(values[:,0:1] - self.prev_values)
-        extra = Image.fromarray(rgb_diff, 'RGB').transpose(Image.Transpose.TRANSPOSE)
-        h0 = self.imdiff.height
-        new_im = Image.new('RGB', (w0, h0 + 1))
-        new_im.paste(self.imdiff, (0,0))
-        new_im.paste(extra, (0,h0))
-        self.imdiff = new_im
+        #rgb_diff = diff_values_to_rgb(values[:,0:1] - self.prev_values)
+        #extra = Image.fromarray(rgb_diff, 'RGB').transpose(Image.Transpose.TRANSPOSE)
+        #h0 = self.imdiff.height
+        #new_im = Image.new('RGB', (w0, h0 + 1))
+        #new_im.paste(self.imdiff, (0,0))
+        #new_im.paste(extra, (0,h0))
+        #self.imdiff = new_im
 
         if self.im.height >= 12 and not self.drawn_labels:
             self.draw_labels()
@@ -88,22 +88,22 @@ class Imager:
         print("Drawing labels")
         offset = 0
         draw = ImageDraw.Draw(self.im)
-        draw2 = ImageDraw.Draw(self.imdiff)
+        #draw2 = ImageDraw.Draw(self.imdiff)
         for key, indices in self.segments:
             draw.text((offset,0), self.abbreviate(key), fill=(0,0,0))
-            draw2.text((offset,0), self.abbreviate(key), fill=(0,0,0))
+            #draw2.text((offset,0), self.abbreviate(key), fill=(0,0,0))
             offset += len(indices)
 
-    def draw_loss(self, loss):
-        print("Drawing loss")
+    def draw_loss(self, loss, time):
+        print("Drawing loss and time")
         draw = ImageDraw.Draw(self.im)
-        draw.text((0,self.im.height-10), f'{loss:.3}', fill=(0,0,0))
-        draw = ImageDraw.Draw(self.imdiff)
-        draw.text((0,self.im.height-10), f'{loss:.3}', fill=(0,0,0))
+        draw.text((0,self.im.height-10), f'{loss:.03}  {time/60:.04}', fill=(0,0,0))
+        #draw = ImageDraw.Draw(self.imdiff)
+        #draw.text((0,self.im.height-10), f'{loss:.3}', fill=(0,0,0))
 
     def save(self):
         self.im.save(self.filename)
-        self.imdiff.save(self.diff_filename)
+        #self.imdiff.save(self.diff_filename)
 
     def extend_from_model(self, model):
         state = model.state_dict()
