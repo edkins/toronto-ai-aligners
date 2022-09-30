@@ -192,28 +192,29 @@ def main():
         window = np.zeros((window_size,), dtype='int32')
         #window = (np.random.random_sample((window_size,)) * 1000 + 256).astype('int32')
         model.eval()
-        output = bytearray()
-        with torch.no_grad():
-            window[0] = 256
-            nxt = 0 #window_size-1
-            for i in range(100):
-                ys = model(torch.tensor(window.reshape(1,window_size)).to(device))[0][nxt]
-                #print(window)
-                #print(ys.argmax(dim=1))
-                #print(ys[nxt])
-                space = random.random() < ys[vocab_size]
-                capital = random.random() < ys[vocab_size+1]
-                eps = np.exp(ys.to('cpu').detach().numpy())
-                pred = random.choices(range(4*vocab_size), weights=eps, k=1)[0]
-                #pred = ys[nxt].argmax().item()
-                output += vocab[pred]
-                if nxt == window_size - 1:
-                    window[:-1] = window[1:]
-                else:
-                    nxt += 1
-                window[nxt] = pred
-                    
-        print(output)
+        for j in range(10):
+            output = bytearray()
+            with torch.no_grad():
+                window[0] = 1026
+                nxt = 0 #window_size-1
+                for i in range(100):
+                    ys = model(torch.tensor(window.reshape(1,window_size)).to(device))[0][nxt]
+                    #print(window)
+                    #print(ys.argmax(dim=1))
+                    #print(ys[nxt])
+                    space = random.random() < ys[vocab_size]
+                    capital = random.random() < ys[vocab_size+1]
+                    eps = np.exp(ys.to('cpu').detach().numpy())
+                    pred = random.choices(range(4*vocab_size), weights=eps, k=1)[0]
+                    #pred = ys[nxt].argmax().item()
+                    output += vocab[pred]
+                    if nxt == window_size - 1:
+                        window[:-1] = window[1:]
+                    else:
+                        nxt += 1
+                    window[nxt] = pred
+                        
+            print(output)
 
         inp = (np.random.random_sample((1,window_size)) * vocab_size).astype('int32')
         inp2 = np.array(inp)
@@ -249,10 +250,50 @@ def load_vocab():
         vocab.append(b"[INVALID]")
     return vocab
 
+def predict2():
+    device = torch.device('cuda')
+    model = MyTransformer('cuda').to(device)
+    model.load_state_dict(torch.load('data/model.pth'))
+    with torch.no_grad():
+        model.eval()
+        temperature = 1 #float(input("Temperature: ") or '1')
+        prompt = input("Enter prompt: ")
+        vocab = load_vocab()
+        remainder = prompt.encode('utf-8')
+        tokens = []
+        while len(remainder) > 0:
+            longest = ' '
+            index = 0
+            for i,word in enumerate(vocab):
+                if remainder.startswith(word) and len(word) >= len(longest):
+                    longest = word
+                    index = i
+            remainder = remainder[len(longest):]
+            tokens.append(index)
+        print([vocab[t] for t in tokens])
+        window = np.zeros((window_size,), dtype='int32')
+        window[:len(tokens)] = tokens
+        for j in range(10):
+            nxt = len(tokens)-1
+            output = bytearray()
+            for i in range(100):
+                ys = model(torch.tensor(window.reshape(1,window_size)).to(device))[0][nxt]
+                eps = np.exp(ys.to('cpu').detach().numpy())
+                pred = random.choices(range(4*vocab_size), weights=eps, k=1)[0]
+                output += vocab[pred]
+                if nxt == window_size - 1:
+                    window[:-1] = window[1:]
+                else:
+                    nxt += 1
+                window[nxt] = pred
+                    
+            print(prompt.encode('utf-8') + bytes(output))
+            print()
+
 def predict():
     model = MyTransformer('cpu')
     model.load_state_dict(torch.load('data/model.pth'))
-    temperature = 0.75 #float(input("Temperature: ") or '1')
+    temperature = 1 #float(input("Temperature: ") or '1')
     prompt = input("Enter prompt: ")
     vocab = load_vocab()
 
@@ -342,6 +383,8 @@ if __name__ == '__main__':
         main()
     elif sys.argv[1] == 'eval':
         predict()
+    elif sys.argv[1] == 'eval2':
+        predict2()
     elif sys.argv[1] == 'analyze':
         analyze()
     elif sys.argv[1] == 'analyze1':
