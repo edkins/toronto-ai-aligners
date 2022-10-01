@@ -10,14 +10,14 @@ import sys
 
 import imaging
 
-window_size = 32
-embedding_size = 56
+window_size = 64
+embedding_size = 24
 index_size = 8
 vocab_size = 4096
 n_heads = 4
 n_layers = 6
-t_key_size = 16
-t_value_size = 32
+t_key_size = 8
+t_value_size = 16
 batch_size = 64
 
 class AttentionHead(Module):
@@ -214,17 +214,18 @@ def main():
                         nxt += 1
                     window[nxt] = pred
                         
-            print(output)
+            print(bytes(output))
+            print()
 
-        inp = (np.random.random_sample((1,window_size)) * vocab_size).astype('int32')
-        inp2 = np.array(inp)
-        inp2[0,window_size // 2] += 1
-        outp = model(torch.tensor(inp).to(device)).detach().cpu().numpy()
-        outp2 = model(torch.tensor(inp2).to(device)).detach().cpu().numpy()
-        print(inp)
-        print(inp2)
-        print(outp[0,:,0])
-        print(outp2[0,:,0])
+        #inp = (np.random.random_sample((1,window_size)) * vocab_size).astype('int32')
+        #inp2 = np.array(inp)
+        #inp2[0,window_size // 2] += 1
+        #outp = model(torch.tensor(inp).to(device)).detach().cpu().numpy()
+        #outp2 = model(torch.tensor(inp2).to(device)).detach().cpu().numpy()
+        #print(inp)
+        #print(inp2)
+        #print(outp[0,:,0])
+        #print(outp2[0,:,0])
 
 def append_vocab(vocab, word):
     vocab.append(word)
