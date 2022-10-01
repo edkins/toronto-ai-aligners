@@ -10,14 +10,14 @@ import sys
 
 import imaging
 
-window_size = 64
-embedding_size = 24
+window_size = 32
+embedding_size = 120
 index_size = 8
 vocab_size = 4096
 n_heads = 4
 n_layers = 6
-t_key_size = 8
-t_value_size = 16
+t_key_size = 16
+t_value_size = 128
 batch_size = 64
 
 class AttentionHead(Module):
@@ -159,17 +159,15 @@ def main():
             avg += loss.detach()
             avg2 += loss.detach()
             if i > 0 and i % chattiness == 0:
-                #print(model.embed.weight)
-                #print(torch.linalg.vector_norm(model.embed.weight.grad).item())
-                output = bytearray()
-                for p in X.to('cpu').numpy()[0]:
-                    output += vocab[p]
-                print(bytes(output))
-                preds = pred[0].to('cpu').detach().numpy()[window_size-1]
-                sortable = list(enumerate(preds))
-                sortable.sort(key=lambda pair:pair[1], reverse=True)
-                for t,prob in sortable[:20]:
-                    print('    ', vocab[t],prob)
+                #output = bytearray()
+                #for p in X.to('cpu').numpy()[0]:
+                #    output += vocab[p]
+                #print(bytes(output))
+                #preds = pred[0].to('cpu').detach().numpy()[window_size-1]
+                #sortable = list(enumerate(preds))
+                #sortable.sort(key=lambda pair:pair[1], reverse=True)
+                #for t,prob in sortable[:20]:
+                #    print('    ', vocab[t],prob)
 
                 print(i, f'{tokens_seen/1000000}m tokens seen', avg.item() / chattiness, f'     {int(time.monotonic()-start_time)} seconds')
                 avg *= 0
@@ -179,7 +177,10 @@ def main():
                 if (i // chattiness) % img_row_chattiness == 0:
                     imager.extend_from_model(model)
                 if (i // chattiness) % img_chattiness == 0:
-                    imager.draw_loss(avg2.item() / chattiness / img_chattiness, time.monotonic() - start_time)
+                    loss2 = avg2.item() / chattiness / img_chattiness
+                    time2 = time.monotonic() - start_time
+                    imager.draw_loss(loss2, time2)
+                    print(loss2, time2)
                     avg2 *= 0
                     imager.save()
 
