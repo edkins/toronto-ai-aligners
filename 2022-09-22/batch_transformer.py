@@ -23,9 +23,9 @@ batch_size = 64
 class AttentionHead(Module):
     def __init__(self, in_size, value_size, key_size, device):
         super().__init__()
-        self.wk = Linear(in_size, key_size, bias=False)    # TODO: maybe bias=True?
-        self.wv = Linear(in_size, value_size, bias=False)
-        self.wq = Linear(in_size, key_size, bias=False)
+        self.wk = Linear(in_size, key_size, bias=True)
+        self.wv = Linear(in_size, value_size, bias=True)
+        self.wq = Linear(in_size, key_size, bias=True)
         tri = (np.tril(np.full((window_size, window_size),2.0, dtype='float32')) - 1) * 100000.0
         self.tri = torch.tensor(tri.reshape((1, window_size, window_size))).to(torch.device(device))
         self.scale = t_key_size ** -0.5
@@ -54,12 +54,12 @@ class TransformerLayer(Module):
         y = torch.cat([self.heads[i](x) for i in range(n_heads)], dim=2)
         y = self.linear(y)
         y = self.dropout(y)
-        y = x + torch.nn.functional.layer_norm(y, (self.in_out_size,), eps=1e-3)    # TODO: layer_norm goes after add?
+        y = torch.nn.functional.layer_norm(x + y, (self.in_out_size,), eps=1e-3)
         z = self.linear2(y)
         z = self.relu(z)
         z = self.linear3(z)
         z = self.dropout2(z)
-        return y + torch.nn.functional.layer_norm(z, (self.in_out_size,), eps=1e-3)
+        return torch.nn.functional.layer_norm(y + z, (self.in_out_size,), eps=1e-3)
 
 class MyTransformer(Module):
     def __init__(self, device='cuda'):
