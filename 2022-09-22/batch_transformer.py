@@ -12,8 +12,7 @@ import pickle
 import imaging
 
 window_size = 32
-embedding_size = 120
-index_size = 8
+embedding_size = 128
 vocab_size = 4096
 n_heads = 4
 n_layers = 4
@@ -66,19 +65,20 @@ class MyTransformer(Module):
     def __init__(self, device='cuda'):
         super().__init__()
         self.embed = Embedding(num_embeddings=vocab_size + 2, embedding_dim=embedding_size-2)
-        self.index = Parameter(torch.rand((1, window_size, index_size)) - 0.5)
+        self.index = Parameter(torch.rand((1, window_size, embedding_size)) - 0.5)
         self.dropout = Dropout(p=0.1)
         layers = []
-        in_size = embedding_size + index_size               # TODO: add rather than concat positional embedding
+        in_size = embedding_size
         for i in range(n_layers):
             layers.append(TransformerLayer(in_size, device))
         self.layers = Sequential(*layers)
-        self.deembed = Linear(in_size, 4 * vocab_size, bias=False)
+        self.deembed = Linear(in_size, 4 * vocab_size, bias=True)
 
     def forward(self, x):
         space = (x & 1).reshape(x.shape[0], x.shape[1], 1)
         capital = (torch.div((x & 2), 2, rounding_mode='floor')).reshape(x.shape[0], x.shape[1], 1)
-        x = torch.cat([self.embed(torch.div(x,4,rounding_mode='floor')), space, capital, self.index.tile(x.shape[0], 1, 1)], dim=2)
+        x = torch.cat([self.embed(torch.div(x,4,rounding_mode='floor')), space, capital], dim=2)
+        x += self.index.tile(x.shape[0], 1, 1)
         x = self.dropout(x)
         x = self.layers(x)
         x = self.deembed(x)
@@ -194,7 +194,6 @@ def main():
                 'state_dict': model.state_dict(),
                 'window_size': window_size,
                 'embedding_size': embedding_size,
-                'index_size': index_size,
                 'vocab_size': vocab_size,
                 'n_heads': n_heads,
                 'n_layers': n_layers,
@@ -256,7 +255,6 @@ def load_model(device='cuda'):
         stuff = pickle.load(f)
     window_size = stuff['window_size']
     embedding_size = stuff['embedding_size']
-    index_size = stuff['index_size']
     vocab_size = stuff['vocab_size']
     n_heads = stuff['n_heads']
     n_layers = stuff['n_layers']
