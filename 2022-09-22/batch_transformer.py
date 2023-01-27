@@ -7,6 +7,7 @@ import math
 import itertools
 import time
 import sys
+import pickle
 
 import imaging
 
@@ -15,15 +16,15 @@ embedding_size = 120
 index_size = 8
 vocab_size = 4096
 n_heads = 4
-n_layers = 6
-t_key_size = 16
-t_value_size = 128
+n_layers = 4
+t_key_size = 32
+t_value_size = 32
 batch_size = 64
 
 class AttentionHead(Module):
     def __init__(self, in_size, value_size, key_size, device):
         super().__init__()
-        self.wk = Linear(in_size, key_size, bias=False)
+        self.wk = Linear(in_size, key_size, bias=False)    # TODO: maybe bias=True?
         self.wv = Linear(in_size, value_size, bias=False)
         self.wq = Linear(in_size, key_size, bias=False)
         tri = (np.tril(np.full((window_size, window_size),2.0, dtype='float32')) - 1) * 100000.0
@@ -54,7 +55,7 @@ class TransformerLayer(Module):
         y = torch.cat([self.heads[i](x) for i in range(n_heads)], dim=2)
         y = self.linear(y)
         y = self.dropout(y)
-        y = x + torch.nn.functional.layer_norm(y, (self.in_out_size,), eps=1e-3)
+        y = x + torch.nn.functional.layer_norm(y, (self.in_out_size,), eps=1e-3)    # TODO: layer_norm goes after add?
         z = self.linear2(y)
         z = self.relu(z)
         z = self.linear3(z)
@@ -68,7 +69,7 @@ class MyTransformer(Module):
         self.index = Parameter(torch.rand((1, window_size, index_size)) - 0.5)
         self.dropout = Dropout(p=0.1)
         layers = []
-        in_size = embedding_size + index_size
+        in_size = embedding_size + index_size               # TODO: add rather than concat positional embedding
         for i in range(n_layers):
             layers.append(TransformerLayer(in_size, device))
         self.layers = Sequential(*layers)
@@ -188,7 +189,19 @@ def main():
         imager.save()
         end_time = time.monotonic()
         print(f'Time taken: {end_time - start_time}. {tokens_seen/(end_time-start_time)} tokens/second')
-        torch.save(model.state_dict(), 'data/model.pth')
+        with open('data/model.pickle', 'wb') as f:
+            pickle.dump({
+                'state_dict': model.state_dict(),
+                'window_size': window_size,
+                'embedding_size': embedding_size,
+                'index_size': index_size,
+                'vocab_size': vocab_size,
+                'n_heads': n_heads,
+                'n_layers': n_layers,
+                't_key_size': t_key_size,
+                't_value_size': t_value_size,
+                'batch_size': batch_size,
+            },f)
         print("Saved model")
         window = np.zeros((window_size,), dtype='int32')
         #window = (np.random.random_sample((window_size,)) * 1000 + 256).astype('int32')
@@ -238,6 +251,23 @@ def append_vocab(vocab, word):
     vocab.append(capital)
     vocab.append(b' ' + capital)
 
+def load_model(device='cuda'):
+    with open('data/model.pickle','rb') as f:
+        stuff = pickle.load(f)
+    window_size = stuff['window_size']
+    embedding_size = stuff['embedding_size']
+    index_size = stuff['index_size']
+    vocab_size = stuff['vocab_size']
+    n_heads = stuff['n_heads']
+    n_layers = stuff['n_layers']
+    t_key_size = stuff['t_key_size']
+    t_value_size = stuff['t_value_size']
+    batch_size = stuff['batch_size']
+
+    model = MyTransformer(device).to(device)
+    model.load_state_dict(stuff['state_dict'])
+    return model
+
 def load_vocab():
     vocab = []
     for i in range(256):
@@ -253,9 +283,7 @@ def load_vocab():
     return vocab
 
 def predict2():
-    device = torch.device('cuda')
-    model = MyTransformer('cuda').to(device)
-    model.load_state_dict(torch.load('data/model.pth'))
+    model = load_model('cuda')
     with torch.no_grad():
         model.eval()
         temperature = 1 #float(input("Temperature: ") or '1')
@@ -293,8 +321,7 @@ def predict2():
             print()
 
 def predict():
-    model = MyTransformer('cpu')
-    model.load_state_dict(torch.load('data/model.pth'))
+    model = load_model('cpu')
     temperature = 1 #float(input("Temperature: ") or '1')
     prompt = input("Enter prompt: ")
     vocab = load_vocab()
@@ -327,14 +354,12 @@ def predict():
     print(bytes(output))
 
 def analyze():
-    model = MyTransformer()
-    model.load_state_dict(torch.load('data/model.pth'))
+    model = load_model('cpu')
     x0 = model.embed.weight.detach().numpy()[:vocab_size,:]
     show_embed(x0, 30)
 
 def analyze1():
-    model = MyTransformer()
-    model.load_state_dict(torch.load('data/model.pth'))
+    model = load_model('cpu')
     x0 = model.embed.weight.detach().numpy()[:vocab_size,:]
     print(x0.shape)
     xk = model.layers[0].heads[0].wq.weight.detach().numpy()[:,:embedding_size-2]
